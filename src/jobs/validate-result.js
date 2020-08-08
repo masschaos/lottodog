@@ -12,7 +12,7 @@ const im = new IM({
   infoChannel: 'dev',
   errorChannel: 'dev',
   source: 'lottodog',
-  env: '开发',
+  env: process.env.NODE_ENV || '开发',
 })
 
 const executeJob = async () => {
@@ -26,7 +26,7 @@ const executeJob = async () => {
 
     for (const country of systemConfigs.countries) {
       for (const level of country.levels) {
-        const resultFile = path.join(__dirname, 'result', 'lottery', moment().format('YYYYMMDD/hhmm'), `${country}-${level}.json`)
+        const resultFile = path.join(__dirname, 'result', 'result', moment().format('YYYYMMDD/hhmm'), `${country}-${level}.json`)
 
         try {
           // get api data
@@ -39,27 +39,27 @@ const executeJob = async () => {
           total += result.total || 0
           failedCount += result.failed || 0
 
-          const count = result.result.length
+          const count = result.detail.length
           let n = messages.length
           let i = 0
           while (n < 10 && i < count) {
-            messages.push(JSON.stringify(result.result[i]))
+            messages.push(apiDataValidator.formatResult(country, level, result.detail[i]))
             i++
             n++
           }
         } catch (err) {
           saveResult && apiDataValidator.saveResult({ err }, resultFile)
-          messages.push(`验证 ${country.name} ${level.name} 异常: ` + JSON.stringify(err))
+          im.error(`检查彩票开奖结果记录 ${country.name} ${level.name} 异常: ` + JSON.stringify(err))
         }
       }
     }
 
     // 发送 slack 消息
-    im.error(`检查彩票信息列表记录共 ${total} 条，失败 ${failedCount} 条，\n${messages.join('\n')}`)
+    im.error(`检查彩票开奖结果记录共 ${total} 条，失败 ${failedCount} 条，\n${messages.join('\n')}`)
     console.log('DONE!')
   } catch (err) {
     console.error(err)
-    messages.push('操作异常: ' + JSON.stringify(err))
+    im.error('检查彩票开奖结果记录异常: ' + JSON.stringify(err))
   }
 }
 

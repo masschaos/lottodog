@@ -45,7 +45,7 @@ class ApiDataValidator {
       err: null,
       total: listData.length,
       failed: failedCount,
-      result: results,
+      detail: results,
     }
   }
 
@@ -56,6 +56,22 @@ class ApiDataValidator {
     }
 
     fs.writeFileSync(file, JSON.stringify(result, null, 2), { encoding: 'utf-8' })
+  }
+
+  formatResult(country, level, detailItem) {
+    let results = detailItem.result
+    if (!(results instanceof Array)) {
+      results = [results]
+    }
+
+    let errors = ''
+    for (let i = 0; i < 5 && i < results.length; i++) {
+      const item = results[i]
+      if (errors) errors += ', '
+      errors += `${item.dataPath}: ${item.message}`
+    }
+
+    return `国家: ${country.name}[${country.code}], level: ${level.name}[${level.code}], id: ${detailItem.id}, ${results.length}处错误: ${errors}`
   }
 }
 

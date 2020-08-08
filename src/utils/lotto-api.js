@@ -1,6 +1,6 @@
 const qs = require('querystring')
 const request = require('request')
-const baseUrl = process.env.BASE_URL
+const baseUrl = process.env.BASE_URL || 'https://seaapi.lottowawa.com/staging/'
 
 class LottoApi {
   /**

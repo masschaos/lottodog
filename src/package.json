@@ -4,9 +4,8 @@
   "description": "Watch Dog for lottery data center.",
   "main": "index.js",
   "scripts": {
-    "start-lottery": "node ./jobs/validate-lottery.js",
-    "start-result": "node ./jobs/validate-result.js",
-    "cleanup": "node ./jobs/clean-result.js"
+    "start-lottery": "node -r dotenv/config ./jobs/validate-lottery.js",
+    "start-result": "node -r dotenv/config ./jobs/validate-result.js"
   },
   "repository": {
     "type": "git",
@@ -38,6 +37,7 @@
   },
   "dependencies": {
     "@masschaos/im": "^0.3.5",
+    "dotenv": "^8.2.0",
     "moment": "^2.27.0",
     "querystring": "^0.2.0",
     "request": "^2.88.2"
