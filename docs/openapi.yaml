@@ -1,0 +1,1030 @@
+openapi: "3.0"
+info:
+  title: Lotto Data API
+  version: "1.0"
+  description: |-
+    # 其他链接
+    - [项目Github](https://github.com/masschaos/lottoserver)
+    - [项目文档](https://wiki.lottowawa.com)
+    - [调研文档](https://docs.qq.com/desktop/mydoc/folder/aE33678aZm_100042)
+
+    # 客户端指引
+
+    客户端在使用接口时，首次进入一般遵循如下流程：
+
+    1. 读取一个国家的彩票配置列表
+    2. 读取一个国家的最新开奖结果，这会与配置列表对应。这一步完成后足以展示首页。
+    3. 后台读取每个彩票的历史数据文件，可以考虑在界面上有不影响操作的进度条。
+    4. 后台补充归档文件到当前结果中间的部分开奖结果
+
+    若非首次进入：
+
+    1. 读取一个国家的彩票配置表和开奖结果，并检查本地存储。
+    2. 补齐缺失的数据。
+
+
+    # API 调用说明
+
+    ## 错误处理
+
+    本文档描述的接口，如非特别注明，返回的 `HTTP Body` 总会是 `JSON` 格式。
+
+    ### 正常情况
+
+    在正常情况下，返回的 `HTTP Status Code` 可能有：
+
+    * `200` OK 除下述情况外，正常返回 Code 都会是 200
+    * `201` Created 在 `POST` 接口创建了内容之后返回，这类接口不幂等，不能重复调用。
+    * `202` Accepted 所有的异步接口将直接返回 202 ，返回后服务器还会继续执行请求。
+    * `204` 在返回 Body 为空时 Code 会是 204
+
+    正常情况返回的 `HTTP Body` 会直接是业务数据。
+
+    ### 异常情况
+
+    如果出现异常，返回的 `HTTP Status Code` 可能有：
+
+    * `400` 请求的 `Query Param` 或 `Request Body` 有误。
+    * `401` 认证出错，注意，只有请求中包含了 Token ，且 Token 已失效才会触发此错误。请求时 Token 格式不对会返回 400 。
+    * `403` 认证信息是正确的，但没有权限访问此资源
+    * `404` 资源没有找到。值得注意的是，列表类接口空列表会返回 200 正常。
+    * `500` 服务端未预期的错误都会返回 500 ，一般不会出现，出现了就是 服务端有 bug 需要检查并修正。
+
+    异常情况总是会返回类似如下数据结构：
+    ```json
+    {
+      "error": "InvalidCountry",
+      "message": "Please input a valid country."
+    }
+    ```
+    这其中 `error` 是一个 `TitleCase` 格式的字符串，我们会在 API 文档中列出重要的 error 。
+    此字段可供客户端做条件判断决定处理流程。
+    `message` 则是语句式的说明。客户端可以作为日志使用，也可以在某些时候直接展示给客户。
+    鉴于本项目是多语言项目，大部分时候客户端可能都需要判断 `error` 进行本土化处理。
+
+    ### 客户端处理
+
+    知名的 `HTTP Clinet` 都会辅助判断 Response 的 `Status Code`，把异常的情况直接做成错误或异常。
+    当遇到错误或异常时，一般可以把 401 封装为自动重新登录刷新token ，403/404/500 也都可以封装统一行为。
+    只有 400 时需要进入业务判断环节，写响应的业务异常代码。
+
+    ## 分页
+
+    由于我们使用的 `DynamoDB` 数据库的特殊性，它无法实现传统的基于页码和每页条数的分页方式。
+    我们会尽量避免接口的分页，预期不会返回太多数据的接口都不会分页，确实需要分页的，采用如下策略：
+
+    我们根据 [RFC 8288](https://tools.ietf.org/html/rfc8288) 的建议，使用 HTTP Header `Link` 来驱动分页。
+    接口返回的 HTTP Body 会直接是 JSON Array 格式的业务模型，当 Response Header 包含 `Link` 时，表明结果未完。
+    ```http
+    200 OK
+    Link: <https://sea.lottowawa.com/lotteries/cn-ssq/results?after=20191231210000&before=20200310210000>; rel=next
+    ```
+    此时需要解析出 next 对应的链接，继续访问即可得到下一页数据，循环直至不再出现 Link Header
+
+    各个语言都有解析 Link 的库，有的就包含在标准库中。比如 Java 的 `Jersey` ，Javascript 的 `parse-link-header`等。
+
+tags:
+  - name: 账号
+    description: 包含用户账号相关的所有接口。
+  - name: 系统信息
+    description: 系统配置相关接口。
+  - name: 彩票信息
+    description: 包含彩票本身相关的接口，以及和单只彩票相关的开奖接口。
+  - name: 开奖结果
+    description: 包含所有和开奖结果相关的接口。
+  - name: 管理接口
+    description: 后台管理相关的接口，客户端不会调用。
+servers:
+  - url: https://weu.lottowawa.com
+    description: 欧洲和非洲区域
+  - url: https://sam.lottowawa.com
+    description: 南美洲区域
+  - url: https://sea.lottowawa.com
+    description: 东南亚和大洋洲区域
+  - url: https://cac.lottowawa.com
+    description: 加拿大区域
+  - url: https://seaapi.lottowawa.com/staging
+    description: 演示服务器
+  - url: https://seaapi.lottowawa.com/guowenjia
+    description: 闻嘉开发环境
+
+paths:
+  /login:
+    post:
+      tags:
+        - 账号
+      summary: 登录
+      description: |-
+        获取 token , 在其他请求时使用。
+      operationId: login
+      requestBody:
+        content:
+          "application/json":
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Token"
+        "400":
+          description: "可能的值: InvalidRequestBody"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: ServerError
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error500"
+  /results:
+    get:
+      tags:
+        - 开奖结果
+      summary: 某国最新全部开奖结果
+      description: |-
+        必须传入 country 和 level ，返回国家相应级别彩票最新开奖结果，按照彩票优先级排序，无分页。
+      operationId: result-list
+      parameters:
+        - name: country
+          in: query
+          description: 2位国家代码
+          required: true
+          schema:
+            type: string
+          example: ph
+        - name: level
+          in: query
+          description: 彩票级别 0国家 1地方 也可能有其他定义
+          required: true
+          schema:
+            type: integer
+          example: 0
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Result"
+        "400":
+          description: Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: ServerError
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error500"
+    post:
+      tags:
+        - 管理接口
+      summary: 录入开奖结果
+      description: |-
+        本接口接受一个开奖数据，如果成功返回存入数据库的实际数据。
+        这个接口可能返回如下错误:
+          * `DuplicatedResult`: 传入的最新彩种已经录入过。以彩种ID+14位开奖时间为标准判断。
+          * `InvalidRequestBody`:  传入的Body里面缺少内容或结构不对。
+          * `InvalidLotteryID`:  未知彩种，也许数据有误，也许彩种还未上线。
+      operationId: result-create
+      requestBody:
+        content:
+          "application/json":
+            schema:
+              $ref: "#/components/schemas/ResultCreate"
+      responses:
+        "201":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Result"
+        "400":
+          description: Bad Request Error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: ServerError
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error500"
+  /results/{id}:
+    get:
+      tags:
+        - 开奖结果
+      summary: "[未实现]获取单期开奖结果"
+      description: 根据ID获取开奖信息。网页版才需要此接口。
+      operationId: result-get
+      parameters:
+        - name: id
+          in: path
+          description: 开奖ID
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Result"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error404"
+        "500":
+          description: ServerError
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error500"
+  /lotteries:
+    get:
+      tags:
+        - 彩票信息
+      summary: 某国家彩票信息列表
+      description: |-
+        必须传入 country 和 level ，返回国家相应级别彩票信息，按照彩票优先级排序，无分页。
+      operationId: lottery-list
+      parameters:
+        - name: country
+          in: query
+          description: 2位国家代码
+          required: true
+          schema:
+            type: string
+          example: ph
+        - name: level
+          in: query
+          description: 彩票级别 0国家 1地方 也可能有其他定义
+          required: true
+          schema:
+            type: integer
+          example: 0
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Lottery"
+        "400":
+          description: 参数错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: ServerError
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error500"
+  /lotteries/{id}:
+    get:
+      tags:
+        - 彩票信息
+      summary: 单个彩票详情
+      description: 根据ID获取彩票详情，彩票 ID 为我们固定声明，参见文档
+      operationId: lottery-get
+      parameters:
+        - name: id
+          in: path
+          description: 彩票 ID
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Lottery"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error404"
+        "500":
+          description: ServerError
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error500"
+  /lotteries/{id}/latest:
+    get:
+      tags:
+        - 开奖结果
+      summary: "[未实现]指定彩票的信息及最新开奖结果"
+      description: 这个接口在获取彩票的最新结果时会嵌入彩票信息(字段名 lottery，文档示例里没有)，供网页一次获取所需数据，网页端使用。
+      operationId: lottery-result-latest
+      parameters:
+        - name: id
+          in: path
+          description: 彩票 ID
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Result"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error404"
+        "500":
+          description: ServerError
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error500"
+  /lotteries/{id}/results:
+    get:
+      tags:
+        - 开奖结果
+      summary: 指定彩票历史开奖结果列表
+      description: |-
+        通常的使用情况是传入 `after` 参数，返回结果会从距离当前日期最近的结果开始按时间从近到远排序。
+        这个接口如果只传after，要求after必须在当前时间向前一年之内。如果还传了before，要求其和after距离不能超过一年。
+        这个接口可能返回如下错误:
+          * `InvalidParamAfter`: 参数 after 与当前时间相距不可超出一年。
+          * `InvalidParamBefore`: 参数 before 与 after 相距不可超出一年。
+      operationId: lottery-result-list
+      parameters:
+        - name: id
+          in: path
+          description: 彩票 ID
+          required: true
+          schema:
+            type: string
+        - name: after
+          in: query
+          description: 在此期之后，不包含此期，内容为 result 的 time 字段
+          required: true
+          schema:
+            type: string
+          example: "20200512210000"
+        - name: before
+          in: query
+          description: 在此期之前，不包含此期，内容为 result 的 time 字段
+          required: false
+          schema:
+            type: string
+          example: "20200512210000"
+        - name: limit
+          in: query
+          description: 最多返回多少条，注意，有可能返回的比这个数字更少
+          required: false
+          schema:
+            type: integer
+            format: int32
+          example: 100
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Result"
+        "400":
+          description: Bad Param
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error404"
+        "500":
+          description: ServerError
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error500"
+  /lotteries/{id}/results/{time}:
+    get:
+      tags:
+        - 开奖结果
+      summary: "[未实现]彩票某期开奖结果"
+      description: 获取单期开奖信息。此接口只是提供了除了开奖ID之外的另一种查询单条开奖信息的方式。
+      operationId: lottery-result-get
+      parameters:
+        - name: id
+          in: path
+          description: 彩票 ID
+          required: true
+          schema:
+            type: string
+        - name: time
+          in: path
+          description: 开奖期次时间
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Result"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: ServerError
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error500"
+  /lotteries/{id}/result/history:
+    get:
+      tags:
+        - 开奖结果
+      summary: 指定彩票的历史结果归档
+      description: 本接口将返回一个归档文件列表，供客户端下载历史数据。
+      operationId: lottery-result-history
+      parameters:
+        - name: id
+          in: path
+          description: 彩票 ID
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResultHistory"
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: ServerError
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error500"
+  /system/config:
+    get:
+      tags:
+        - 系统信息
+      summary: 获取区域配置
+      description: 本接口将返回一个对象，对象里面countries里面包含多个国家等级配置信息。
+      operationId: system-config
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemConfig"
+        "500":
+          description: ServerError
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error500"
+# models
+components:
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: TitleCase string, error type.
+          required: true
+          example: InvalidQueryParam
+        message:
+          type: string
+          description: error message.
+          required: true
+          example: please provide correct query parameters.
+    Error404:
+      type: object
+      properties:
+        error:
+          type: string
+          description: TitleCase string, error type.
+          required: true
+          example: NotFound
+        message:
+          type: string
+          description: error message.
+          required: true
+          example: Record not found.
+    Error500:
+      type: object
+      properties:
+        error:
+          type: string
+          description: TitleCase string, error type.
+          required: true
+          example: ServerError
+        message:
+          type: string
+          description: error message.
+          required: true
+          example: Please contact your system administrator or submit an github issue report.
+    LoginRequest:
+      type: object
+      properties:
+        source:
+          type: string
+          description: Login 发起方类型
+          required: true
+          example: android
+        code:
+          type: string
+          description: |-
+            根据不同的发起方，会是不同的内容。
+            - phone：手机验证码
+            - android：ANDROID_ID
+            - 第三方登录：一般第三方都会提供个 code
+            - refresh: Refresh Token
+    Token:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT token
+          required: true
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c
+        expiredAt:
+          type: integer
+          format: int64
+          description: unix time
+          example: 1405544146
+        refreshToken:
+          type: string
+          description: 在 token 快要过期或已经过期时，可以在不打扰用户的情况下，用 refresh token 获取新的 token.
+          format: uuid
+          required: true
+          example: 086d4bc7-a5e0-4269-85f7-148a65aadbbe
+        refreshExpiredAt:
+          type: integer
+          format: int64
+          description: unix time
+          example: 1405545146
+    Result:
+      allOf:
+        - type: object
+          properties:
+            id:
+              type: string
+              description: 结果唯一ID，是一个uuid
+              format: uuid
+              required: true
+              example: 086d4bc7-a5e0-4269-85f7-148a65aadbbe
+        - $ref: "#/components/schemas/ResultCreate"
+    ResultCreate:
+      type: object
+      properties:
+        lotteryID:
+          type: string
+          description: 彩票ID 是我们定义好的，并不是随机的
+          required: true
+          example: ph-4digitsgame
+        drawTime:
+          type: string
+          description: 开奖时间 可能是8位日期或14位时间
+          required: true
+          example: "20200416090000"
+        issue:
+          type: string
+          description: 期号 有的彩票没有期号
+          example: "2020025"
+        numbers:
+          type: string
+          description: 开奖结果序列，`,`分隔一箱中的连续多次`#`分隔一箱中的多组`|`分隔多箱
+          required: true
+          example: 15,20,29,01,09#07
+        expiredAt:
+          description: 过期日期 ISO-8601 Date，如果有这个字段，以这里的数据为准，没有时可以根据彩票规则自己计算。
+          example: "2020-06-14"
+          type: string
+        prevDrawTime:
+          description: 上期开奖时间，与上次结果的 drawTime 字段相同
+          example: "20200414090000"
+          type: string
+        nextDrawTime:
+          description: 下期开奖时间，与下次结果的 drawTime 字段相同
+          example: "20200418090000"
+          type: string
+        jackpot:
+          type: array
+          description: 下期头奖金额,大部分时候只有一个，个别彩票有多个，可带货币符号。
+          example: ["100000000"]
+          items:
+            type: string
+        poolSize:
+          type: array
+          description: 本期奖池金额,大部分时候只有一个，个别彩票有多个，可带货币符号。
+          example: ["742200788"]
+          items:
+            type: string
+        nextPoolSize:
+          type: array
+          description: 下期奖池金额,大部分时候只有一个，个别彩票有多个，可带货币符号。
+          example: ["742200788"]
+          items:
+            type: string
+        saleAmount:
+          description: 销售额，原始字符串，可带货币
+          example: "$321611812"
+          type: string
+        videoKey:
+          description: 开奖视频 s3 key
+          type: string
+        stepLeft:
+          description: 距离完整结果还差几步，如果没有此字段或为0，即为完整结果。
+          type: integer
+          format: int32
+          example: 0
+        hasBreakdown:
+          description: 是否有额外的 breakdown ，有的话需要用 /results/:id/breakdown 去请求。
+          type: bool
+        breakdown:
+          $ref: "#/components/schemas/Breakdown"
+        dynamicResult:
+          type: array
+          description: |-
+            动态开奖结果，是一个 Object Array，每个元素为一个结果，数量不确定。
+            只在个别彩票使用此字段替代breakdown
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                description: 奖级名称，同一个名称可能存在多条，客户端可以合并展示。
+                example: "20 millones"
+              number:
+                type: string
+                description: 彩票号码
+                example: "1234"
+              serie:
+                type: string
+                description: 系列（西班牙彩票的属性）
+                example: "123"
+        detail:
+          type: array
+          description: |-
+            **本字段即将废弃，旧数据中存在，有客户端在使用，新数据使用 breakdown 替代**
+            奖项详情 按照奖项从大到小排列
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+                description: 奖项名称 必填 若有分组可用|分隔，前端可将第一列在表格合并
+                example: 一等奖
+              prize:
+                type: string
+                description: 单注奖金
+                example: "$99"
+              count:
+                type: integer
+                description: 中奖人数
+                example: 10
+              total:
+                type: string
+                description: 本级总奖金
+                example: "$990"
+        other:
+          type: array
+          description: 所有其他数据，每个元素为一个 string,string map ,为了静态语言可以解析到 string map 中
+          items:
+            type: object
+            additionalProperties:
+              type: string
+    Breakdown:
+      type: array
+      description: |-
+        breakdown 在为空时，有可能是本彩票没有分解结果，也有可能是还没有录入，需要参考
+        hasBreakdown 字段。
+        在请求 latest 接口时，会自动带 breakdown。其他情况下，结果并不会带，
+        需要判断 hasBreakdown 为 true 时，去调用 /results/:id/breakdown 请求。
+        第一级列表每个元素代表一种玩法的中奖详情。
+      items:
+        type: object
+        properties:
+          name:
+            type: string
+            description: 玩法名称，使用当地语言，可以直接被展示
+            example: 常规玩法
+          detail:
+            type: array
+            description: |-
+              **本字段在废弃中，旧数据中存在，有客户端在使用，新数据使用 breakdown 替代**
+              奖项详情 按照奖项从大到小排列
+            items:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: 奖项名称 必填 若有分组可用|分隔，前端可将第一列在表格合并
+                  example: 一等奖
+                prize:
+                  type: string
+                  description: 单注奖金
+                  example: "$99"
+                count:
+                  type: integer
+                  description: 中奖人数
+                  example: 10
+                total:
+                  type: string
+                  description: 本级总奖金
+                  example: "$990"
+    ResultHistory:
+      type: object
+      properties:
+        lotteryID:
+          type: string
+          description: 彩票ID 是我们定义好的，并不是随机的
+          required: true
+          example: ph-4digitsgame
+        startTime:
+          type: string
+          description: 总开始期数
+          required: true
+          example: "20000101090000"
+        endTime:
+          type: string
+          description: 总结束期数
+          required: true
+          example: "20191231090000"
+        count:
+          type: integer
+          description: 全部历史文件包含的期数
+          required: true
+          format: int32
+          example: 3800
+        files:
+          type: array
+          items:
+            type: object
+            properties:
+              startTime:
+                type: string
+                description: 开始期数
+                required: true
+                example: "20000101090000"
+              endTime:
+                type: string
+                description: 结束期数
+                required: true
+                example: "20001231090000"
+              cycle:
+                type: string
+                description: 彩票结果历史归档周期 1y 每年 1m 每月
+                required: true
+                example: 1y
+              count:
+                type: integer
+                description: 本文件包含的期数
+                format: int32
+                required: true
+                example: 200
+              url:
+                type: string
+                description: 文件的地址，注意地址有有效期，过一段时间就会过期
+                required: true
+                example: "https://seafile.lottowawa.com/history/ph-xxx/2010.json.zip"
+    Lottery:
+      type: object
+      description: 未完成，未来可能扩充更多字段
+      properties:
+        id:
+          type: string
+          description: 彩票ID 是我们定义好的，并不是随机的
+          required: true
+          example: ph-4digitsgame
+        name:
+          type: string
+          description: 原始彩票名称
+          required: true
+          example: "4 Digits Game (4D)"
+        nameEn:
+          type: string
+          description: 彩票名称第二语言，其中 En 可能为其他标准语言代码，只有当此国家官方使用多种语言时需要此字段。
+          example: "4D游戏"
+        oldKey:
+          type: string
+          description: 旧版彩票 key ，供后台使用，客户端请忽略。
+          example: "ph_4 digits game"
+        country:
+          type: string
+          description: 国家 必填
+          required: true
+          example: ph
+        level:
+          type: integer
+          format: int32
+          description: 级别 必填：0 国家级 1 地方级，也可能根据不同国家有不同定义
+          required: true
+          example: 0
+        type:
+          type: string
+          description: 彩票类别 用以在某个国家一级数据中分组 没有分组需求则不需要此字段
+          example: 福彩
+        priority:
+          type: integer
+          format: int32
+          description: 重要程度 必填 数字越小越重要 用以排序
+          required: true
+          example: 10
+        currency:
+          type: string
+          description: 奖金货币代码
+          example: php
+        timezone:
+          type: string
+          description: 彩票所用时区
+          example: GMT+08:00
+        tz:
+          type: string
+          description: 彩票所用时区，unix规范
+          example: Asia/Shanghai
+        delay:
+          type: integer
+          format: int32
+          description: 网站出现结果的时间相对于开奖时间的延迟，单位分钟。
+          example: 10
+        isQuickDraw:
+          type: bool
+          description: 开奖频率是否高于一天一次，用以爬虫调度
+        historyCycle:
+          type: string
+          description: 彩票结果历史归档周期 1y 每年 1m 每月
+          example: 1y
+        startTime:
+          type: string
+          description: 我们系统中收录的第一期的开奖时间
+          required: true
+          example: "20100113210000"
+        issueRule:
+          type: string
+          description: 期号规则
+        closed:
+          type: bool
+          description: 是否在休市中，休市时我们会停止本彩票相关的各种任务
+        isDynamicResult:
+          type: bool
+          description: 开奖和编排过程如果是动态不可预期的，则下属开奖与编排配置都无效，结果模型中 dynamicResult 会存储动态开奖结果。
+        hasBreakdown:
+          description: 是否有额外的 breakdown，供爬虫调度使用，有的话需要单独抓取并用 /results/:id/breakdown 去保存。
+          type: bool
+        upstream:
+          type: string
+          description: 值为 crawler 代表彩票数据由 lottocrawler 写入。值为 old 代表数据由旧系统同步。
+        drawConfig:
+          type: object
+          description: "开奖过程元数据 TODO: 还未完成"
+          properties:
+            timeRule:
+              type: string
+              description: "[废弃,使用timeRules]预期开奖时间，cron 表达式。"
+              example: "00 21 * * 1,3,5"
+            timeRules:
+              type: array
+              description: 开奖时间规则，如果一个cron表达不了，可以用多个
+              items:
+                type: string
+                description: cron 表达式。
+                example: "00 21 * * 1,3,5"
+            drawList:
+              type: array
+              description: 开奖过程中按次序排列的几个桶，原配置文件中的 DrawConfig - drawList 部分。
+              items:
+                type: object
+                properties:
+                  type:
+                    type: string
+                    description: 抽奖描述方式的类型,一般我们用 regex 正则表达式
+                    example: regex
+                  format:
+                    type: string
+                    description: 抽奖描述的内容，正则表达式内容
+                    example: "[01-16]{1}"
+                  times:
+                    type: integer
+                    description: 这个过程重复多少次
+                    example: 1
+                  subDrawList:
+                    type: array
+                    description: 一桶中的分组，如果一直重复一次次的拿可以配合 times 这里只写1
+                    items:
+                      type: integer
+                    example: [7, 1]
+        composeConfig:
+          type: object
+          description: "玩法规则元数据 TODO: 还未完成"
+          properties:
+            composeList:
+              type: array
+              description: "每个元素是一个玩法，如越南那种每个奖级算一个玩法"
+              items:
+                type: object
+                description: 玩法规则
+                properties:
+                  name:
+                    type: string
+                    description: 玩法名称或者奖级名称
+                    example: 常规
+                  number:
+                    type: array
+                    description: 二维数组，第一层是一个玩法或者一个奖级有多少个开奖结果
+                    example:
+                      [
+                        [
+                          { "drawIndex": 0, "subDrawIndex": 0 },
+                          { "drawIndex": 0, "subDrawIndex": 1 },
+                        ],
+                      ]
+                    items:
+                      type: array
+                      description: 第二层是单个的结果里的每个数字占一个元素
+                      items:
+                        type: object
+                        description: 这个结构描述了这个数字在 drawList 中的坐标
+                        properties:
+                          drawIndex:
+                            type: integer
+                            description: 第几桶 从0开始
+                          subDrawIndex:
+                            type: integer
+                            description: 第几组 从0开始
+    SystemConfig:
+      type: object
+      properties:
+        countries:
+          type: array
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+                description: 国家代码
+                required: true
+                example: ph
+              name:
+                type: string
+                description: 国家名称
+                required: true
+                example: 菲律宾
+              levels:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    code:
+                      type: string
+                      description: 国家内级别
+                      required: true
+                      example: "0"
+                    name:
+                      type: string
+                      description: 级别对应名称
+                      required: true
+                      example: 国家级

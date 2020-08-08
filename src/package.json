@@ -1,0 +1,45 @@
+{
+  "name": "lottodog",
+  "version": "1.0.0",
+  "description": "Watch Dog for lottery data center.",
+  "main": "index.js",
+  "scripts": {
+    "start-lottery": "node ./jobs/validate-lottery.js",
+    "start-result": "node ./jobs/validate-result.js",
+    "cleanup": "node ./jobs/clean-result.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/masschaos/lottodog.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/masschaos/lottodog/issues"
+  },
+  "homepage": "https://github.com/masschaos/lottodog#readme",
+  "devDependencies": {
+    "@openapi-contrib/openapi-schema-to-json-schema": "^3.0.3",
+    "ajv": "^6.12.3",
+    "eslint": "^7.6.0",
+    "eslint-config-prettier": "^6.11.0",
+    "eslint-config-standard": "^14.1.1",
+    "eslint-plugin-compat": "^3.8.0",
+    "eslint-plugin-import": "^2.22.0",
+    "eslint-plugin-markdown": "^1.0.2",
+    "eslint-plugin-node": "^11.1.0",
+    "eslint-plugin-prettier": "^3.1.4",
+    "eslint-plugin-promise": "^4.2.1",
+    "eslint-plugin-require-jsdoc-except": "^1.4.0",
+    "eslint-plugin-sort-requires": "^2.1.0",
+    "eslint-plugin-standard": "^4.0.1",
+    "prettier": "^2.0.5",
+    "prettier-eslint": "^11.0.0"
+  },
+  "dependencies": {
+    "@masschaos/im": "^0.3.5",
+    "moment": "^2.27.0",
+    "querystring": "^0.2.0",
+    "request": "^2.88.2"
+  }
+}
