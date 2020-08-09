@@ -1,7 +1,7 @@
 const CronJob = require('cron').CronJob
 const validateLotteryJob = require('./jobs/validate-lottery')
 const validateResultJob = require('./jobs/validate-result')
-const isDebug = process.env.DEBUG_MODE
+const isDebug = String(process.env.DEBUG_MODE) === 'true'
 
 const cronjobLottery = new CronJob(
   isDebug ? '*/3 * * * *' : '0 */1 * * *', // 每个整点检查一次

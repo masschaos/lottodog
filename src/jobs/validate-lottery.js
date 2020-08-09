@@ -3,7 +3,7 @@ const IM = require('@masschaos/im')
 const lottoApi = require('../utils/lotto-api')
 const moment = require('moment')
 const path = require('path')
-const saveResult = process.env.SAVE_RESULT
+const saveResult = String(process.env.SAVE_RESULT) === 'true'
 
 const im = new IM({
   provider: process.env.IM_PROVIDER || 'debug',
