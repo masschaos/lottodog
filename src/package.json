@@ -4,6 +4,7 @@
   "description": "Watch Dog for lottery data center.",
   "main": "index.js",
   "scripts": {
+    "start": "node -r dotenv/config ./index.js",
     "start-lottery": "node -r dotenv/config ./jobs/validate-lottery.js",
     "start-result": "node -r dotenv/config ./jobs/validate-result.js"
   },
@@ -19,7 +20,6 @@
   "homepage": "https://github.com/masschaos/lottodog#readme",
   "devDependencies": {
     "@openapi-contrib/openapi-schema-to-json-schema": "^3.0.3",
-    "ajv": "^6.12.3",
     "eslint": "^7.6.0",
     "eslint-config-prettier": "^6.11.0",
     "eslint-config-standard": "^14.1.1",
@@ -37,6 +37,8 @@
   },
   "dependencies": {
     "@masschaos/im": "^0.3.5",
+    "ajv": "^6.12.3",
+    "cron": "^1.8.2",
     "dotenv": "^8.2.0",
     "moment": "^2.27.0",
     "querystring": "^0.2.0",
