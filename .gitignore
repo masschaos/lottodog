@@ -104,3 +104,6 @@ dist
 .tern-port
 
 .idea
+
+# MacOS folder Config
+.DS_Store
