@@ -22,7 +22,8 @@ class ValidateLotteryJob {
     let failedCount = 0
 
     try {
-      const apiDataValidator = new ApiDataValidator(require('./schema/lotto-api'))
+      const apiDataConfig = './schema/lotto-api'
+      const apiDataValidator = new ApiDataValidator(require(apiDataConfig))
       const systemConfigs = await lottoApi.getSystemConfigs()
 
       for (const country of systemConfigs.countries) {
